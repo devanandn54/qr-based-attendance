@@ -17,5 +17,6 @@ router.post('/generate', auth, async(req, res) => {
         res.status(400).send(error)
     }
 });
+//working fine and session id is being generated
 
 module.exports = router;

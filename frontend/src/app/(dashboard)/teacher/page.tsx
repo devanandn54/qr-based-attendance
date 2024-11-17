@@ -5,15 +5,18 @@ import { useAttendance } from "@/lib/hooks/useAttendance";
 import AttendanceQRCode from '@/components/AttendanceQRCode';
 import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchApi } from "@/lib/api";
-import { AttendanceSession, AttendanceRecord } from "@/types";
-
+import { AttendanceSession, AttendanceRecord, Location } from "@/types";
+//AIzaSyBhHKDrKrWVdbZwvZVaneYkQldr0a5DY4A
+const NEXT_PUBLIC_GOOGLE_MAPS_API_KEY = "AIzaSyBhHKDrKrWVdbZwvZVaneYkQldr0a5DY4A"
 type PopulatedAttendanceRecord = Omit<AttendanceRecord, 'studentId'> & {
   studentId: {
     _id: string;
     username: string;
   };
 };
-
+type LocationDisplay = Location & {
+  readableAddress: string;
+};
 
 type AttendanceModalProps = {
   session: AttendanceSession;
@@ -24,13 +27,42 @@ const AttendanceModal = ({ session, onClose }: AttendanceModalProps) => {
   const [attendance, setAttendance] = useState<PopulatedAttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [locationDisplays, setLocationDisplays] = useState<Record<string, string>>({});
+
+  const getReadableAddress = async (latitude: number, longitude: number): Promise<string> => {
+    try {
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}`
+      );
+      const data = await response.json();
+      if(data.results && data.results[0]) {
+        return data.results[0].formatted_address;
+      }
+      return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+    } catch (error) {
+      console.error('Geocoding error:', error);
+      return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+    }
+    
+  };
 
   useEffect(() => {
-    const fetchAttendance = async () => {
+    const fetchAttendanceAndLocations = async () => {
       try {
         const response = await fetchApi(`/attendanceSession/sessions/${session._id}/attendance`);
         if (Array.isArray(response)) {
           setAttendance(response as PopulatedAttendanceRecord[]);
+          const addresses: Record<string, string> = {};
+          for(const record of response) {
+            const key = `${record.location.latitude}, ${record.location.longitude}`;
+            if(!addresses[key]) {
+              addresses[key] = await getReadableAddress(
+                record.location.latitude,
+                record.location.longitude
+              );
+            }
+          }
+          setLocationDisplays(addresses);
         } else {
           throw new Error('Invalid response format');
         }
@@ -41,7 +73,7 @@ const AttendanceModal = ({ session, onClose }: AttendanceModalProps) => {
       }
     };
 
-    fetchAttendance();
+    fetchAttendanceAndLocations();
   }, [session._id]);
 
   return (
@@ -79,8 +111,10 @@ const AttendanceModal = ({ session, onClose }: AttendanceModalProps) => {
                 <div>Time</div>
                 <div>Location</div>
               </div>
-              {attendance.map((record) => (
-                <div
+              {attendance.map((record) => {
+                const locationKey = `${record.location.latitude}, ${record.location.longitude}`;
+                return (
+                  <div
                   key={record._id}
                   className="grid grid-cols-3 gap-4 py-3 border-b border-gray-100 text-sm"
                 >
@@ -91,10 +125,13 @@ const AttendanceModal = ({ session, onClose }: AttendanceModalProps) => {
                     {new Date(record.timestamp).toLocaleString()}
                   </div>
                   <div className="text-gray-600">
-                    {`${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}`}
+                  {locationDisplays[locationKey] || 
+                       `${record.location.latitude.toFixed(6)}, ${record.location.longitude.toFixed(6)}`}
                   </div>
                 </div>
-              ))}
+                )
+                
+                })}
             </div>
           )}
         </div>
@@ -123,6 +160,66 @@ export default function TeacherPage() {
   const lastFetchTime = useRef<number>(0);
   const FETCH_COOLDOWN = 5000;
   const POLLING_INTERVAL = 30000;
+
+  const [currentLocation, setCurrentLocation] = useState<LocationDisplay | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  const getReadableAddress = async (latitude: number, longitude: number): Promise<string> => {
+    try {
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}`
+      );
+      const data = await response.json();
+      if (data.results && data.results[0]) {
+        return data.results[0].formatted_address;
+      }
+      return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+    } catch (err) {
+      console.error('Geocoding error:', err);
+      return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+    }
+  };
+
+  const getCurrentLocation = useCallback(() => {
+    if(!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by your browser');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+       const coords = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude
+       };
+       try {
+        const address = await getReadableAddress(coords.latitude, coords.longitude);
+        setCurrentLocation({
+          ...coords,
+          readableAddress: address
+        });
+        setLocationError(null);
+      } catch (err) {
+        console.error('Error getting address:', err);
+        setCurrentLocation({
+          ...coords,
+          readableAddress: `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`
+        });
+      }
+        
+      },
+      (error) => {
+        setLocationError('Unable to retrieve your location');
+        console.error('Geolocation error:', error);
+      }
+    );
+  }, []);
+
+  useEffect(() => {
+    getCurrentLocation();
+
+  }, [getCurrentLocation]);
+
+  
 
   const stopPolling = useCallback(() => {
     if (pollingIntervalRef.current) {
@@ -208,11 +305,14 @@ export default function TeacherPage() {
 
   // Rest of the component remains the same...
   const handleCreateSession = async () => {
-    if (isLoading) return;
+    if (isLoading || !currentLocation) return;
 
     try {
       setIsLoading(true);
-      await createSession();
+      await createSession({
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude
+      });
       await safeRefreshSessions();
       setSuccess('Session created successfully!');
       setTimeout(() => setSuccess(null), 3000);
@@ -310,6 +410,22 @@ export default function TeacherPage() {
             <p className="text-sm text-gray-600 mt-1">
               Active Sessions: {getActiveSessionsCount()}
             </p>
+            {locationError && (
+              <p className="text-sm text-red-500 mt-1">
+                {locationError}
+              
+              <button 
+              onClick = {getCurrentLocation}
+              className="ml-2 text-indigo-600 hover:text-indigo-800">
+                Retry
+                </button>
+                </p>  
+            )}
+            {currentLocation && (
+              <p className="text-sm text-gray-600 mt-1">
+                Location: {currentLocation.readableAddress}
+                </p>
+            )}
           </div>
           <button
             onClick={handleCreateSession}

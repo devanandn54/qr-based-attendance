@@ -16,13 +16,24 @@ router.post('/sessions', auth, async (req, res) => {
       if (req.user.role !== 'teacher') {
         return res.status(403).send({ error: 'Only teachers can create sessions' });
       }
+
+      const { location } = req.body;
+      if(!location?.latitude || !location?.longitude) {
+        return res.status(400).json({
+            error: 'Location data is required'
+        });
+      }
   
       const code = generateCode();
     //   console.log("my data....", req.user);
       const session = new AttendanceSession({
         teacherId: req.user._id,
         code,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000) // 15 minutes from now
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes from now
+        location: {
+            type: 'Point',
+            coordinates: [location.longitude, location.latitude]
+        }
       });
   
       await session.save();
@@ -38,7 +49,7 @@ router.post('/sessions', auth, async (req, res) => {
 router.get('/sessions', auth, async (req, res) => {
     
     try {
-        console.log("user:", req.user);
+        
       const sessions = await AttendanceSession.find({ 
         teacherId: req.user._id 
       }).sort({ createdAt: -1 });
@@ -82,6 +93,8 @@ router.get('/sessions/:id/attendance', auth, async (req, res) => {
         _id: req.params.id,
         teacherId: req.user._id
       });
+
+      console.log("session.....", session);
   
       if (!session) {
         return res.status(404).send({ error: 'Session not found' });
@@ -93,10 +106,11 @@ router.get('/sessions/:id/attendance', auth, async (req, res) => {
     const attendance = await Attendance.find({ sessionId: session._id })
             .populate({
                 path: 'studentId',
-                select: 'username email', // Add any other user fields you want to include
-                match: { role: 'student' } // Only populate if the user is a student
+                select: 'username', // Add any other user fields you want to include
+                match: { role: 'Student' } // Only populate if the user is a student
             })
             .lean(); 
+            console.log("attendances...", attendance)
             const validAttendance = attendance.filter(record => record.studentId !== null);
 
             const formattedAttendance = validAttendance.map(record => ({

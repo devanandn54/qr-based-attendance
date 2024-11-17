@@ -7,6 +7,7 @@ export class ApiError extends Error {
     constructor(public status: number, message: string) {
         super(message);
         this.name = 'ApiError'
+        this.message = typeof message === 'string' ? message : 'An error occurred';
     }
 }
 function getTokenFromCookies() {
@@ -19,21 +20,37 @@ export async function fetchApi<T>(
     options: RequestInit = {}
 ): Promise<T> {
     const token = getTokenFromCookies();
+    if (!token) {
+        throw new ApiError(401, 'Authentication required');
+    }
+
     const headers: HeadersInit = {
         'Content-Type' : 'application/json',
         ...(token && { Authorization: `Bearer ${token}`}),
         ...options.headers,
 
     };
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        ...options,
-        headers,
-    });
+    try{
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            ...options,
+            headers,
+        });
+        const data = await response.json();
+        if(!response.ok){
+            throw new ApiError(response.status, data.message || 'An error occurred')
+        }
+        return data;
+    
 
-    const data = await response.json();
-
-    if(!response.ok){
-        throw new ApiError(response.status, data.message || 'An error occurred')
+    }catch(error) {
+        if (error instanceof ApiError) {
+            throw error;
+        }
+        throw new ApiError(500, 'Network error or server unavailable');
     }
-    return data;
+    
+    
+
+    
+    
 }

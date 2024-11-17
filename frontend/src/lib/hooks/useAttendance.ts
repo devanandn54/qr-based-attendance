@@ -1,4 +1,4 @@
-import { AttendanceSession, AttendanceHookReturn } from "@/types";
+import { AttendanceSession, AttendanceHookReturn, Location } from "@/types";
 import { useState } from "react";
 import { fetchApi } from "../api";
 
@@ -22,12 +22,13 @@ export function useAttendance(): AttendanceHookReturn {
         }
     };
 
-    const createSession = async (): Promise<AttendanceSession> => {
+    const createSession = async (location: Location): Promise<AttendanceSession> => {
         setLoading(true);
         setError(null);
         try {
             const session = await fetchApi<AttendanceSession>('/attendanceSession/sessions', {
                 method: 'POST',
+                body: JSON.stringify({location})
             });
             setSessions(prev => [session, ...prev]);
             return session;

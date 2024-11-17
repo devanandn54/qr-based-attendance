@@ -9,6 +9,11 @@ export interface User {
     role: 'teacher' | 'student';
     // user: User;
   }
+
+  export interface Location {
+    latitude: number;
+    longitude: number;
+  }
   
   export interface ApiErrorData {
     message?: string;
@@ -35,12 +40,13 @@ export interface User {
     expiresAt: string;
     status: 'active' | 'expired' | 'cancelled';
     code: string;
+    location: Location;
   }
   export interface AttendanceHookReturn {
     sessions: AttendanceSession[];
     loading: boolean;
     error: string | null;
-    createSession: () => Promise<AttendanceSession>;
+    createSession: (location: Location) => Promise<AttendanceSession>;
     refreshSessions: () => Promise<void>;  // Added this type definition
 }
   

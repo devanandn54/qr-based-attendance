@@ -3,7 +3,7 @@
 import { useAuth } from "@/lib/hooks/useAuth";
 import { QRScanner } from "@/components/QRScanner";
 import { useState, useEffect } from "react";
-import { AttendanceRecord, AttendanceSession } from "@/types";
+import { ApiError, AttendanceRecord, AttendanceSession } from "@/types";
 import { fetchApi } from "@/lib/api";
 
 // Updated type to match schema exactly
@@ -39,7 +39,7 @@ export default function StudentPage() {
     try {
       const parsedData: QRSessionData = JSON.parse(qrData);
       // Validate that we have either sessionId or code
-      if (!parsedData.sessionId && !parsedData.code) {
+      if (!parsedData.code) {
         throw new Error('Invalid QR code data');
       }
       setScannedData(parsedData);
@@ -51,8 +51,41 @@ export default function StudentPage() {
     }
   };
 
+  const markAttendance = async (code: string, location: { latitude: number, longitude: number }) => {
+    try {
+      await fetchApi<AttendanceRecord>('/attendance/mark', {
+        method: 'POST',
+        body: JSON.stringify({
+          code, // Using code instead of sessionId
+          location
+        }),
+      });
+
+      setSuccess('Attendance marked successfully!');
+      return true;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('already marked')) {
+        setError('Attendance already marked for this session');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to mark attendance');
+      }
+      return false;
+    }
+  };
+
+  const getLocation = async (): Promise<GeolocationPosition> => {
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
+      });
+    });
+  };
+
+
   const handleAttendanceConfirmation = async () => {
-    if (!userData?._id || !scannedData) {
+    if (!userData?._id || !scannedData?.code) {
       setError('Missing required data');
       return;
     }
@@ -62,37 +95,21 @@ export default function StudentPage() {
     setSuccess(null);
 
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0
-        });
-      });
-
-      const attendanceData = {
-        sessionId: scannedData.sessionId,  // MongoDB _id
-        location: {
+      const position = await getLocation();
+      const success = await markAttendance(
+        scannedData.code,
+        {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         }
-      };
+      );
 
-      await fetchApi<AttendanceRecord>('/attendance/mark', {
-        method: 'POST',
-        body: JSON.stringify(attendanceData),
-      });
-
-      setSuccess('Attendance marked successfully!');
-      setScannedData(null);
-      setConfirmationStep(false);
-      
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('already marked')) {
-        setError('Attendance already marked for this session');
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to mark attendance');
+      if (success) {
+        setScannedData(null);
+        setConfirmationStep(false);
       }
+    } catch (err) {
+      setError('Failed to get location. Please ensure location services are enabled.');
     } finally {
       setScanning(false);
     }
@@ -100,46 +117,35 @@ export default function StudentPage() {
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userData?._id || !manualCode) {
-      setError('Please enter a valid code');
+    if (!manualCode || !/^\d{6}$/.test(manualCode)) {
+      setError('Please enter a valid 6-digit code');
       return;
-    }
+  }
 
     setScanning(true);
     setError(null);
     setSuccess(null);
 
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0
-        });
-      });
-
-      const attendanceData = {
-        sessionId: manualCode, // Using the 6-digit code for manual entry
-        location: {
+      const position = await getLocation();
+      const success = await markAttendance(
+        manualCode,
+        {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         }
-      };
+      );
 
-      await fetchApi<AttendanceRecord>('/attendance/mark', {
-        method: 'POST',
-        body: JSON.stringify(attendanceData),
-      });
-
-      setSuccess('Attendance marked successfully!');
-      setManualCode('');
-      
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('already marked')) {
-        setError('Attendance already marked for this session');
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to mark attendance');
+      if (success) {
+        setManualCode('');
+        setSuccess('Attendance marked successfully!');
       }
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+    } else {
+        setError('Failed to get location. Please ensure location services are enabled.');
+    }
     } finally {
       setScanning(false);
     }
@@ -267,7 +273,7 @@ export default function StudentPage() {
                           value={manualCode}
                           onChange={(e) => setManualCode(e.target.value)}
                           placeholder="Enter 6-digit code"
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-black sm:text-sm"
                         />
                       </div>
                       <button

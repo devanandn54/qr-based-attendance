@@ -3,12 +3,15 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError, LoginResponse } from '@/types';
-import { fetchApi } from '@/lib/api';
+import { fetchApi, setAuthCookies } from '@/lib/api';
+import Image from 'next/image';
+;
 
 interface LoginForm {
   username: string;
   password: string;
 }
+
 
 export default function LoginPage() {
   const [formData, setFormData] = useState<LoginForm>({
@@ -46,38 +49,40 @@ export default function LoginPage() {
     if (!validateForm()) return;
 
     try {
-      setIsLoading(true);
-      setErrors({}); // Clear any previous errors
-      
-      console.log('Submitting login request...'); // Debug log
-      
-      const response = await fetchApi<LoginResponse>('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify(formData),
-      });
-      
-      console.log('Login response:', response); // Debug log
-      
-      if (!response.token || !response.role) {
-        throw new Error('Invalid response from server');
-      }
+        setIsLoading(true);
+        setErrors({});
+        
+        console.log('Submitting login request...');
+        
+        const response = await fetchApi<LoginResponse>('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify(formData),
+        });
+        
+        console.log('Login response:', response);
+        
+        if (!response.token || !response.role) {
+            throw new Error('Invalid response from server');
+        }
 
-      const normalizedRole = response.role.toLowerCase() as 'teacher' | 'student';
-      console.log('normalizedRole', normalizedRole);
-      
-      // Store auth data
-      document.cookie = `token=${response.token}; path=/;`;
-      document.cookie = `role=${normalizedRole}; path=/;`;
-      
-      // Determine redirect path
-      const redirectPath = normalizedRole === 'teacher' ? '/teacher' : '/student';
-      
-      console.log('Redirecting to:', redirectPath); // Debug log
-      
-      // Force a hard navigation instead of client-side routing
-      // window.location.href = redirectPath;
-      router.refresh();
-      router.push(redirectPath);
+        const normalizedRole = response.role.toLowerCase() as 'teacher' | 'student';
+        console.log('normalizedRole', normalizedRole);
+        
+        // Set cookies first
+        setAuthCookies(response.token, normalizedRole);
+
+        
+        
+        // Determine redirect path
+        const redirectPath = normalizedRole === 'teacher' ? '/teacher' : '/student';
+        console.log('Redirecting to:', redirectPath);
+        
+        // Add a small delay to ensure cookies are set
+        router.refresh(); // Clear router cache
+        await router.push(redirectPath); // Navigate to the target page  
+        
+  
+        
       
     } catch (error) {
       console.error('Login error:', error); // Debug log
@@ -95,15 +100,25 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-lg shadow-md">
-        <h1 className="text-2xl font-bold text-center text-gray-900">Login</h1>
+    <div className="min-h-screen bg-gradient-to-br from-blue-500 to-indigo-800 flex items-center justify-center">
+      <div className="w-full max-w-md bg-white p-8 rounded-lg shadow-2xl">
+        <div className="flex flex-col items-center mb-8">
+          <Image
+            src="/qurify.svg"
+            alt="Qurify"
+            width={180}
+            height={150}
+            className="mb-4"
+          />
+          <h1 className="text-3xl font-bold text-gray-900">Welcome to Qurify</h1>
+          <p className="text-gray-600 text-lg">Verifying Presence with Precision</p>
+        </div>
         {errors.general && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+          <div className="p-4 bg-red-50 border border-red-200 rounded-md mb-6">
             <p className="text-sm text-red-600">{errors.general}</p>
           </div>
         )}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="username" className="block text-sm font-medium text-gray-700">
               Username
@@ -114,13 +129,13 @@ export default function LoginPage() {
               name="username"
               value={formData.username}
               onChange={handleChange}
-              className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-black ${
+              className={`mt-2 block w-full px-4 py-3 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-black ${
                 errors.username ? 'border-red-500' : 'border-gray-300'
               }`}
               placeholder="Enter your username"
             />
             {errors.username && (
-              <p className="mt-1 text-sm text-red-500">{errors.username}</p>
+              <p className="mt-2 text-sm text-red-500">{errors.username}</p>
             )}
           </div>
 
@@ -134,25 +149,26 @@ export default function LoginPage() {
               name="password"
               value={formData.password}
               onChange={handleChange}
-              className={`mt-1 block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-black ${
+              className={`mt-2 block w-full px-4 py-3 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-black ${
                 errors.password ? 'border-red-500' : 'border-gray-300'
               }`}
               placeholder="Enter your password"
             />
             {errors.password && (
-              <p className="mt-1 text-sm text-red-500">{errors.password}</p>
+              <p className="mt-2 text-sm text-red-500">{errors.password}</p>
             )}
           </div>
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-md shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isLoading ? 'Logging in...' : 'Login'}
           </button>
         </form>
       </div>
     </div>
-  );
+  )
+
 }

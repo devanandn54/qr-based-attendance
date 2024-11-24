@@ -8,12 +8,19 @@ const router = express.Router();
 const generateCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
+const refreshSessionCode = async (session) => {
+  const newCode = generateCode();
+  session.code = newCode;
+  session.codeUpdatedAt = new Date();
+  await session.save();
+  return session;
+};
 
 // Create a new session
 router.post('/sessions', auth, async (req, res) => {
     try {
       // Verify user is a teacher
-      if (req.user.role !== 'teacher') {
+      if (req.userRole !== 'teacher') {
         return res.status(403).send({ error: 'Only teachers can create sessions' });
       }
 
@@ -27,7 +34,7 @@ router.post('/sessions', auth, async (req, res) => {
       const code = generateCode();
     //   console.log("my data....", req.user);
       const session = new AttendanceSession({
-        teacherId: req.user._id,
+        teacherId: req.userId,
         code,
         expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes from now
         location: {
@@ -49,9 +56,12 @@ router.post('/sessions', auth, async (req, res) => {
 router.get('/sessions', auth, async (req, res) => {
     
     try {
+      if (req.userRole !== 'teacher') {
+        return res.status(403).send({ error: 'Only teachers can view sessions' });
+    }
         
       const sessions = await AttendanceSession.find({ 
-        teacherId: req.user._id 
+        teacherId: req.userId 
       }).sort({ createdAt: -1 });
       
       res.send(sessions);
@@ -60,13 +70,53 @@ router.get('/sessions', auth, async (req, res) => {
       res.status(500).send({ error: error.message });
     }
   });
+  router.get('/sessions/:id/code', auth, async (req, res) => {
+    try {
+        if (req.userRole !== 'teacher') {
+            return res.status(403).send({ error: 'Only teachers can access session codes' });
+        }
+
+        const session = await AttendanceSession.findOne({
+            _id: req.params.id,
+            teacherId: req.userId,
+            status: 'active'
+        });
+
+        if (!session) {
+            return res.status(404).send({ error: 'Session not found' });
+        }
+
+        // Check if code needs refresh (older than 3 minutes)
+        const codeAge = Date.now() - new Date(session.codeUpdatedAt).getTime();
+        if (codeAge >= 3 * 60 * 1000) { // 3 minutes
+            const updatedSession = await refreshSessionCode(session);
+            return res.send({
+                code: updatedSession.code,
+                codeUpdatedAt: updatedSession.codeUpdatedAt,
+                expiresAt: updatedSession.expiresAt
+            });
+        }
+
+        res.send({
+            code: session.code,
+            codeUpdatedAt: session.codeUpdatedAt,
+            expiresAt: session.expiresAt
+        });
+    } catch (error) {
+        console.error('Fetch session code error:', error);
+        res.status(500).send({ error: error.message });
+    }
+});
 
   // Update session status (e.g., expire a session)
 router.patch('/sessions/:id', auth, async (req, res) => {
     try {
+      if (req.userRole !== 'teacher') {
+        return res.status(403).send({ error: 'Only teachers can update sessions' });
+    }
       const session = await AttendanceSession.findOne({
         _id: req.params.id,
-        teacherId: req.user._id
+        teacherId: req.userId
       });
   
       if (!session) {
@@ -89,9 +139,13 @@ router.patch('/sessions/:id', auth, async (req, res) => {
   // Get attendance records for a session (for teachers)
 router.get('/sessions/:id/attendance', auth, async (req, res) => {
     try {
+      if (req.userRole !== 'teacher') {
+        return res.status(403).send({ error: 'Only teachers can view attendance records' });
+    }
+      
       const session = await AttendanceSession.findOne({
         _id: req.params.id,
-        teacherId: req.user._id
+        teacherId: req.userId
       });
 
       console.log("session.....", session);
@@ -135,5 +189,6 @@ router.get('/sessions/:id/attendance', auth, async (req, res) => {
       res.status(500).send({ error: error.message });
     }
   });
+
   
   module.exports = router;

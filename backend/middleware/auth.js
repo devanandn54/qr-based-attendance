@@ -10,11 +10,13 @@ module.exports = async (req, res, next) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         // console.log("my decoded.....", decoded);
 
-        const user = await User.findById(decoded.userId);
-        if(!user) {
-            throw new Error('User not found');
-        }
-        req.user = user;
+        // const user = await User.findById(decoded.userId);
+        // if(!user) {
+        //     throw new Error('User not found');
+        // }
+        req.userId = decoded.userId;
+        req.userRole = decoded.role;
+        req.sessionId = decoded.sessionId;
         next();
     } catch (error) {
         console.error('Auth middleware error:', error);

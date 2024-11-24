@@ -3,7 +3,7 @@
 import { useAuth } from "@/lib/hooks/useAuth";
 import { QRScanner } from "@/components/QRScanner";
 import { useState, useEffect } from "react";
-import { ApiError, AttendanceRecord, AttendanceSession } from "@/types";
+import { ApiError, AttendanceRecord } from "@/types";
 import { fetchApi } from "@/lib/api";
 
 // Updated type to match schema exactly
@@ -25,13 +25,15 @@ export default function StudentPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [scannedData, setScannedData] = useState<QRSessionData | null>(null);
   const [confirmationStep, setConfirmationStep] = useState(false);
-  const { user } = useAuth();
+  const { user } = useAuth('student');
+
+  const forceScanner = true;
 
   useEffect(() => {
-    setIsMobile(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+    setIsMobile(forceScanner || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
     setMounting(false);
     if (user) {
-      setUserData({ _id: user.id });
+      setUserData({ _id: user.userId });
     }
   }, [user]);
 
@@ -231,7 +233,7 @@ export default function StudentPage() {
         
         {userData ? (
           <div>
-            {!confirmationStep && isMobile && (
+            {!confirmationStep && (isMobile || forceScanner) && (
               <div className="flex space-x-1 rounded-lg bg-gray-100 p-1 mb-6">
                 <button
                   onClick={() => setActiveTab('manual')}
@@ -261,7 +263,7 @@ export default function StudentPage() {
                 renderConfirmationStep()
               ) : (
                 <>
-                  {(!isMobile || activeTab === 'manual') ? (
+                  {(!isMobile && !forceScanner) || activeTab === 'manual' ? (
                     <form onSubmit={handleManualSubmit} className="space-y-4">
                       <div>
                         <label htmlFor="code" className="block text-sm font-medium text-gray-700">

@@ -6,7 +6,18 @@ const auth = require("../middleware/auth")
 
 const router = express.Router();
 
-
+const generateToken = (userId, role) => {
+    return jwt.sign(
+        { 
+            userId, 
+            role,
+            // Add a unique identifier for each login session
+            sessionId: Math.random().toString(36).substring(2)
+        }, 
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+    );
+};
 router.post('/register', async(req, res) => {
     try {
         const user = new User(req.body);
@@ -25,31 +36,38 @@ router.post('/login', async(req, res) => {
         if(!user || !(await bcrypt.compare(req.body.password, user.password))) {
             return res.status(401).send({error: " Invalid login credentials "});
         }
-        const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
-        res.send({token, role: user.role});
+        const token = generateToken(user._id, user.role);
+        res.send({token, role: user.role, userId: user._id, username: user.username});
     } catch (error) {
         res.status(400).send(error)
     }
 });
 
 
-router.get('/validate',  auth, (req, res) => {
-    // const token = req.headers.authorization?.split(' ')[1]; // Extract token from 'Bearer token'
-    // if (!token) {
-    //     return res.status(401).send({ error: "Token missing" });
-    // }
+router.get('/validate',  auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
 
-    // try {
-    //     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    //     res.status(200).send({ userId: decoded.userId, role: decoded.role });
-    // } catch (error) {
-    //     res.status(401).send({ error: "Invalid token" });
-    // }
-    res.status(200).send({ userId: req.userId, message: "User authenticated successfully" });
+        if(!user) {
+            return res.status(401).send({ error: 'User not found'});
+        }
+
+        if(req.userRole !== user.role) {
+            return res.status(401).send({ error: 'Role mismatch'})
+        }
+        res.status(200).send({
+            userId: user._id,
+            username: user.username,
+            role: user.role
+        });
+
+    } catch (error) {
+        res.status(401).send({ error: "Authentication failed" });
+    }
+    // res.status(200).send({ userId: req.userId, message: "User authenticated successfully" });
 
 });
 
 module.exports = router;
 
 //working fine in postman
-module.exports = router;

@@ -67,7 +67,7 @@ router.post('/mark', auth, async(req, res) => {
 
         // Check if student already marked attendance
         const existingAttendance = await Attendance.findOne({
-            studentId: req.user._id,
+            studentId: req.userId,
             sessionId: session._id
         });
 
@@ -76,7 +76,7 @@ router.post('/mark', auth, async(req, res) => {
         }
 
         const attendance = new Attendance({
-            studentId: req.user._id,
+            studentId: req.userId,
             sessionId: session._id,
             location: {
                 type: 'Point',

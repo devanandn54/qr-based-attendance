@@ -1,46 +1,76 @@
-'use client'
+'use client';
+
 import { User } from "@/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { fetchApi } from "../api";
+import { AUTH_COOKIES, fetchApi, getRoleSpecificToken } from "../api";
 
-function getCookieValue(name: string) {
-    const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-    return match ? decodeURIComponent(match[2]) : null;
-}
-
-export function useAuth() {
+export function useAuth(role: 'teacher' | 'student') {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
 
     useEffect(() => {
-        const token = getCookieValue('token');
-        const role = getCookieValue('role');
+        let mounted = true;
+        console.log('useAuth effect running for role:', role);
 
-        if(!token || !role) {
-            setLoading(false);
-            router.push('/login');
-            return;
-        }
+        const validateAuthentication = async () => {
+            try {
+                const token = getRoleSpecificToken(role);
+                
+                if (!token) {
+                    console.log('No token found, redirecting to login');
+                    if (mounted) {
+                        setUser(null);
+                        setLoading(false);
+                    }
+                    router.push('/login');
+                    return;
+                }
 
-        //validate token 
-        fetchApi<User>('/auth/validate', {
-            method: 'GET',
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        })
-        .then(userData => {
-            setUser(userData);
-            setLoading(false);
-        })
-        .catch(() => {
-            document.cookie = 'token=; Max-Age=0';
-            document.cookie = 'role=; Max-Age=0';
-            router.push('/login');
-            setLoading(false);
-        });
-    }, [router]);
+                console.log('Validating token for', role);
+                
+                const userData = await fetchApi<User>('/auth/validate', {
+                    method: 'GET'
+                }, role);
+
+                console.log('User validated:', userData);
+
+                if (!mounted) return;
+
+                if (userData.role.toLowerCase() !== role) {
+                    console.log('Role mismatch, redirecting');
+                    const correctPath = userData.role.toLowerCase() === 'teacher' ? '/teacher' : '/student';
+                    router.refresh();
+                    router.push(correctPath);
+                    return;
+                }
+
+                setUser(userData);
+                setLoading(false)
+
+            } catch (error) {
+                console.error('Authentication validation failed:', error);
+                
+                if (!mounted) return;
+                setUser(null);
+                setLoading(false);
+
+                if (window.location.pathname !== '/login') {
+                    router.refresh();
+                    router.push('/login');
+                }
+                
+                
+            } 
+        };
+
+        validateAuthentication();
+
+        return () => {
+            mounted = false;
+        };
+    }, [role, router]);
+
     return { user, loading };
 }

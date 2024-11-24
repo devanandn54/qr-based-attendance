@@ -1,13 +1,14 @@
 export interface User {
     username: string;
-    role: 'teacher' | 'student';
-    id: string;
+    role: string;
+    userId: string;
   }
   
   export interface LoginResponse {
     token: string;
-    role: 'teacher' | 'student';
-    // user: User;
+    role: string;
+    userId: string;
+    username: string;
   }
 
   export interface Location {

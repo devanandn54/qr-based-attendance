@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/lib/hooks/useAuth";
 import { QRScanner } from "@/components/QRScanner";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ApiError, AttendanceRecord } from "@/types";
 import { fetchApi } from "@/lib/api";
 
@@ -26,6 +26,7 @@ export default function StudentPage() {
   const [scannedData, setScannedData] = useState<QRSessionData | null>(null);
   const [confirmationStep, setConfirmationStep] = useState(false);
   const { user } = useAuth('student');
+  const [hasActiveSessions, setHasActiveSessions] = useState<boolean>(false);
 
   const forceScanner = true;
 
@@ -36,6 +37,25 @@ export default function StudentPage() {
       setUserData({ _id: user.userId });
     }
   }, [user]);
+
+  const checkActiveSessions = useCallback(async () => {
+    try {
+      const response = await fetchApi<{ hasActive: boolean }>('/attendanceSession/check-active', {
+        method: 'GET'
+      });
+      setHasActiveSessions(response.hasActive);
+    } catch (err) {
+      console.error('Failed to check active sessions:', err);
+      setHasActiveSessions(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkActiveSessions();
+    const interval = setInterval(checkActiveSessions, 30000); // Check every 30 seconds
+    return () => clearInterval(interval);
+  }, [checkActiveSessions]);
+
 
   const handleQRCodeScan = async (qrData: string) => {
     try {
@@ -214,98 +234,193 @@ export default function StudentPage() {
     );
   };
 
-  return (
-    <div className="space-y-6 p-6">
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          {error}
-        </div>
-      )}
+  const renderNoSessionsMessage = () => (
+    <div className="flex flex-col items-center justify-center py-12 px-4">
+      <div className="rounded-full bg-gray-100 p-6 mb-6">
+        <svg 
+          className="w-16 h-16 text-gray-400"
+          fill="none" 
+          stroke="currentColor" 
+          viewBox="0 0 24 24"
+        >
+          <path 
+            strokeLinecap="round" 
+            strokeLinejoin="round" 
+            strokeWidth={1.5}
+            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" 
+          />
+        </svg>
+      </div>
       
-      {success && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
-          {success}
-        </div>
-      )}
+      <h3 className="text-xl font-semibold text-gray-900 mb-2">
+        No Active Sessions
+      </h3>
       
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Mark Attendance</h2>
-        
-        {userData ? (
-          <div>
-            {!confirmationStep && (isMobile || forceScanner) && (
-              <div className="flex space-x-1 rounded-lg bg-gray-100 p-1 mb-6">
-                <button
-                  onClick={() => setActiveTab('manual')}
-                  className={`flex-1 py-2.5 text-sm font-medium rounded-md ${
-                    activeTab === 'manual'
-                      ? 'bg-white text-gray-900 shadow'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  Enter Code
-                </button>
-                <button
-                  onClick={() => setActiveTab('scan')}
-                  className={`flex-1 py-2.5 text-sm font-medium rounded-md ${
-                    activeTab === 'scan'
-                      ? 'bg-white text-gray-900 shadow'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  Scan QR
-                </button>
-              </div>
-            )}
-
-            <div className="mt-4">
-              {confirmationStep ? (
-                renderConfirmationStep()
-              ) : (
-                <>
-                  {(!isMobile && !forceScanner) || activeTab === 'manual' ? (
-                    <form onSubmit={handleManualSubmit} className="space-y-4">
-                      <div>
-                        <label htmlFor="code" className="block text-sm font-medium text-gray-700">
-                          Enter Attendance Code
-                        </label>
-                        <input
-                          type="text"
-                          id="code"
-                          value={manualCode}
-                          onChange={(e) => setManualCode(e.target.value)}
-                          placeholder="Enter 6-digit code"
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-black sm:text-sm"
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={scanning}
-                        className={`w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white 
-                          ${scanning 
-                            ? 'bg-indigo-400 cursor-not-allowed' 
-                            : 'bg-indigo-600 hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
-                          }`}
-                      >
-                        {scanning ? 'Marking Attendance...' : 'Mark Attendance'}
-                      </button>
-                    </form>
-                  ) : (
-                    <div className="space-y-4">
-                      <p className="text-sm text-gray-500">
-                        Use your device's camera to scan the QR code shown by your instructor.
-                      </p>
-                      <QRScanner onScan={handleQRCodeScan} scanning={scanning} setScanning={setScanning} />
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="text-red-500">Please log in to mark attendance</div>
-        )}
+      <p className="text-gray-500 text-center max-w-sm mb-6">
+        There are currently no active attendance sessions. Please wait for your instructor to start a new session.
+      </p>
+      
+      <button
+        onClick={checkActiveSessions}
+        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+      >
+        <svg 
+          className="w-4 h-4 mr-2" 
+          fill="none" 
+          stroke="currentColor" 
+          viewBox="0 0 24 24"
+        >
+          <path 
+            strokeLinecap="round" 
+            strokeLinejoin="round" 
+            strokeWidth={2} 
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
+          />
+        </svg>
+        Check Again
+      </button>
+      
+      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm text-gray-500">
+        <div className="flex items-center">
+          <svg 
+            className="w-5 h-5 mr-2 text-gray-400" 
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path 
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+            />
+          </svg>
+          Sessions are created by instructors
+        </div>
+        <div className="flex items-center">
+          <svg 
+            className="w-5 h-5 mr-2 text-gray-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path 
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          Mark attendance when session starts
+        </div>
       </div>
     </div>
+  );
+
+  return (
+    <div className="space-y-6 p-6">
+    {error && (
+      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        {error}
+      </div>
+    )}
+    
+    {success && (
+      <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
+        {success}
+      </div>
+    )}
+    
+    <div className="bg-white shadow rounded-lg p-6">
+      <h2 className="text-2xl font-bold text-gray-900 mb-4">Mark Attendance</h2>
+      
+      {userData ? (
+        <div>
+          {!hasActiveSessions ? (
+            renderNoSessionsMessage()
+          ) : (
+            <>
+              {!confirmationStep && (isMobile || forceScanner) && (
+                <div className="flex space-x-1 rounded-lg bg-gray-100 p-1 mb-6">
+                  <button
+                    onClick={() => setActiveTab('manual')}
+                    className={`flex-1 py-2.5 text-sm font-medium rounded-md ${
+                      activeTab === 'manual'
+                        ? 'bg-white text-gray-900 shadow'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Enter Code
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('scan')}
+                    className={`flex-1 py-2.5 text-sm font-medium rounded-md ${
+                      activeTab === 'scan'
+                        ? 'bg-white text-gray-900 shadow'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Scan QR
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-4">
+                {confirmationStep ? (
+                  renderConfirmationStep()
+                ) : (
+                  <>
+                    {(!isMobile && !forceScanner) || activeTab === 'manual' ? (
+                      <form onSubmit={handleManualSubmit} className="space-y-4">
+                        <div>
+                          <label htmlFor="code" className="block text-sm font-medium text-gray-700">
+                            Enter Attendance Code
+                          </label>
+                          <input
+                            type="text"
+                            id="code"
+                            value={manualCode}
+                            onChange={(e) => setManualCode(e.target.value)}
+                            placeholder="Enter 6-digit code"
+                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-black sm:text-sm"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={scanning}
+                          className={`w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white 
+                            ${scanning 
+                              ? 'bg-indigo-400 cursor-not-allowed' 
+                              : 'bg-indigo-600 hover:bg-indigo-700 focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
+                            }`}
+                        >
+                          {scanning ? 'Marking Attendance...' : 'Mark Attendance'}
+                        </button>
+                      </form>
+                    ) : (
+                      <div className="space-y-4">
+                        <p className="text-sm text-gray-500">
+                          Use your device's camera to scan the QR code shown by your instructor.
+                        </p>
+                        <QRScanner 
+                          onScan={handleQRCodeScan} 
+                          scanning={scanning} 
+                          setScanning={setScanning} 
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="text-center py-8">
+          <div className="text-red-500 font-medium">Please log in to mark attendance</div>
+        </div>
+      )}
+    </div>
+  </div>
   );
 }

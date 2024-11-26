@@ -52,6 +52,21 @@ router.post('/sessions', auth, async (req, res) => {
     }
   });
 
+  router.get('/check-active', auth, async (req, res) => {
+    try {
+      const now = new Date();
+      const activeSession = await AttendanceSession.findOne({
+        status: 'active',
+        expiresAt: { $gt: now }
+      });
+      
+      res.json({ hasActive: !!activeSession });
+    } catch (error) {
+      console.error('Check active sessions error:', error);
+      res.status(500).send({ error: 'Failed to check active sessions' });
+    }
+  });
+
   // Get all sessions for a teacher
 router.get('/sessions', auth, async (req, res) => {
     

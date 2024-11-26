@@ -49,6 +49,7 @@ export interface User {
     error: string | null;
     createSession: (location: Location) => Promise<AttendanceSession>;
     refreshSessions: () => Promise<void>;  // Added this type definition
+    updateSession: (sessionId: string, updates: Partial<AttendanceSession>) => Promise<AttendanceSession>;
 }
   
   export interface AttendanceRecord {

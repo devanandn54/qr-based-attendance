@@ -24,9 +24,10 @@ export default function AttendanceQRCode({ session, onExpire }: AttendanceQRCode
     const [nextRefresh, setNextRefresh] = useState<number>(0);
     const [isRefreshing, setIsRefreshing] = useState(false);
     
+    
     const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastFetchTime = useRef<number>(0);
-
+    const fetchInProgress = useRef<boolean>(false);
     const generateQR = useCallback(async (code: string, timestamp: string) => {
         try {
             const payload = {
@@ -46,18 +47,23 @@ export default function AttendanceQRCode({ session, onExpire }: AttendanceQRCode
             });
             setQrUrl(url);
             setDisplayCode(code);
+            
         } catch (err) {
             console.error("Error generating QR code:", err);
+            
         }
     }, [session._id, session.teacherId]);
 
     const fetchCurrentCode = useCallback(async (force: boolean = false) => {
-        if (isRefreshing && !force) return;
+        if (fetchInProgress.current && !force) {
+            return;
+        }
         
         const now = Date.now();
-        if (!force && now - lastFetchTime.current < 1000) return;
+        if (!force && now - lastFetchTime.current < 2000) return;
         
         try {
+            fetchInProgress.current = true;
             setIsRefreshing(true);
             lastFetchTime.current = now;
 
@@ -71,17 +77,57 @@ export default function AttendanceQRCode({ session, onExpire }: AttendanceQRCode
             if (force || !currentCode || response.code !== currentCode.code) {
                 setCurrentCode(response);
                 await generateQR(response.code, response.codeUpdatedAt);
-                
+                const codeUpdateTime = new Date(response.codeUpdatedAt).getTime();
                 // Set next refresh time (2:55 minutes)
-                const nextRefreshTime = new Date(response.codeUpdatedAt).getTime() + (2 * 60 + 55) * 1000;
+                const nextRefreshTime = codeUpdateTime + (2 * 60 + 55) * 1000;
                 setNextRefresh(nextRefreshTime);
             }
         } catch (err) {
             console.error("Error fetching session code:", err);
+            const retryTime = force ? 5000 : 30000; // 5 seconds if forced, 30 seconds otherwise
+            if (refreshTimeoutRef.current) {
+                clearTimeout(refreshTimeoutRef.current);
+            }
+            refreshTimeoutRef.current = setTimeout(() => fetchCurrentCode(true), retryTime);
         } finally {
             setIsRefreshing(false);
+            fetchInProgress.current = false;
         }
-    }, [session._id, generateQR, currentCode, isRefreshing]);
+    }, [session._id, generateQR, currentCode]);
+    useEffect(() => {
+        fetchCurrentCode(true);
+        return () => {
+            if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+            
+        };
+    }, [fetchCurrentCode]);
+
+    useEffect(() => {
+        if (!nextRefresh) return;
+
+        const scheduleNextRefresh = () => {
+            if (refreshTimeoutRef.current) {
+                clearTimeout(refreshTimeoutRef.current);
+            }
+
+            const now = Date.now();
+            const timeToRefresh = nextRefresh - now;
+
+            if (timeToRefresh <= 0) {
+                fetchCurrentCode(true);
+            } else {
+                refreshTimeoutRef.current = setTimeout(() => fetchCurrentCode(true), timeToRefresh);
+            }
+        };
+
+        scheduleNextRefresh();
+
+        return () => {
+            if (refreshTimeoutRef.current) {
+                clearTimeout(refreshTimeoutRef.current);
+            }
+        };
+    }, [nextRefresh, fetchCurrentCode]);
 
     // Immediate refresh function
     const immediateRefresh = useCallback(() => {

@@ -5,7 +5,7 @@ import { useAttendance } from "@/lib/hooks/useAttendance";
 import AttendanceQRCode from "@/components/AttendanceQRCode";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchApi } from "@/lib/api";
-import { AttendanceSession, AttendanceRecord, Location } from "@/types";
+import { AttendanceSession, AttendanceRecord, Location, ApiError } from "@/types";
 type PopulatedAttendanceRecord = Omit<AttendanceRecord, "studentId"> & {
   studentId: {
     _id: string;
@@ -172,7 +172,7 @@ export default function TeacherPage() {
     Record<string, string>
   >({});
   const { user, loading } = useAuth("teacher");
-  const { sessions, createSession, refreshSessions } = useAttendance();
+  const { sessions, createSession, refreshSessions, updateSession } = useAttendance();
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isPollingRef = useRef(false);
   const lastFetchTime = useRef<number>(0);
@@ -254,13 +254,46 @@ export default function TeacherPage() {
     isPollingRef.current = false;
   }, []);
 
-  const hasActiveSessions = useCallback(() => {
+  const hasActiveSession = useCallback(() => {
     return sessions.some((session) => {
       const now = new Date();
       const expiresAt = new Date(session.expiresAt);
       return session.status === "active" && expiresAt > now;
     });
   }, [sessions]);
+
+  const getCreateButtonState = useCallback(() => {
+    if (isLoading) {
+      return {
+        disabled: true,
+        text: "Creating...",
+        tooltip: "Creating new session"
+      };
+    }
+    
+    if (hasActiveSession()) {
+      return {
+        disabled: true,
+        text: "Create New Session",
+        tooltip: "Please wait for the current session to expire"
+      };
+    }
+
+    if (!currentLocation) {
+      return {
+        disabled: true,
+        text: "Create New Session",
+        tooltip: "Waiting for location"
+      };
+    }
+
+    return {
+      disabled: false,
+      text: "Create New Session",
+      tooltip: ""
+    };
+  }, [isLoading, hasActiveSession, currentLocation]);
+
 
   const canFetch = useCallback(() => {
     const now = Date.now();
@@ -337,10 +370,10 @@ export default function TeacherPage() {
 
       stopPolling();
 
-      if (hasActiveSessions()) {
+      if (hasActiveSession()) {
         isPollingRef.current = true;
         pollingIntervalRef.current = setInterval(async () => {
-          if (hasActiveSessions()) {
+          if (hasActiveSession()) {
             await safeRefreshSessions();
             await updateSessionLocations();
           } else {
@@ -356,11 +389,11 @@ export default function TeacherPage() {
       mounted = false;
       stopPolling();
     };
-  }, [user, mounting, hasActiveSessions, safeRefreshSessions, stopPolling, updateSessionLocations]);
+  }, [user, mounting, hasActiveSession, safeRefreshSessions, stopPolling, updateSessionLocations]);
 
   // Rest of the component remains the same...
   const handleCreateSession = async () => {
-    if (isLoading || !currentLocation) return;
+    if (isLoading || !currentLocation || hasActiveSession()) return;
 
     try {
       setIsLoading(true);
@@ -384,16 +417,31 @@ export default function TeacherPage() {
 
     try {
       setIsLoading(true);
-      await fetchApi(`/attendanceSession/sessions/${sessionId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "expired" }),
-      });
+      await updateSession(sessionId, {status: "expired"});
+      stopPolling();
       await safeRefreshSessions();
       setSuccess("Session expired successfully!");
       setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update session");
-      setTimeout(() => setError(null), 3000);
+      await updateSessionLocations();
+    } catch (error) {
+      console.error('Session end error:', error);
+      if (error instanceof ApiError) {
+        // Handle specific error cases
+        if (error.status === 404) {
+          await safeRefreshSessions();
+                setSuccess("Session already ended");
+                setTimeout(() => setSuccess(null), 3000);
+        } else if (error.status === 403) {
+          setError('Not authorized to end this session');
+          setTimeout(() => setError(null), 3000);
+        } else {
+          setError(error.message || 'Error ending session');
+          setTimeout(() => setError(null), 3000);
+        }
+      } else {
+        setError('Unexpected error while ending session');
+        setTimeout(() => setError(null), 3000);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -504,17 +552,28 @@ export default function TeacherPage() {
               </p>
             )}
           </div>
-          <button
-            onClick={handleCreateSession}
-            disabled={getActiveSessionsCount() >= 3 || isLoading}
-            className={`px-4 py-2 rounded-md transition-colors ${
-              getActiveSessionsCount() >= 3 || isLoading
-                ? "bg-gray-400 cursor-not-allowed"
-                : "bg-indigo-600 hover:bg-indigo-700 text-white"
-            }`}
-          >
-            {isLoading ? "Creating..." : "Create New Session"}
-          </button>
+          <div className="relative group">
+            <button
+              onClick={handleCreateSession}
+              disabled={getCreateButtonState().disabled}
+              className={`px-4 py-2 rounded-md transition-colors ${
+                getCreateButtonState().disabled
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-indigo-600 hover:bg-indigo-700 text-white"
+              }`}
+            >
+              {getCreateButtonState().text}
+            </button>
+            
+            {getCreateButtonState().disabled && getCreateButtonState().tooltip && (
+              <div className="absolute bottom-full mb-2 hidden group-hover:block">
+                <div className="bg-gray-800 text-white text-sm rounded py-1 px-2 whitespace-nowrap">
+                  {getCreateButtonState().tooltip}
+                </div>
+                <div className="w-3 h-3 bg-gray-800 transform rotate-45 absolute left-1/2 -translate-x-1/2 -bottom-1"></div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -554,7 +613,14 @@ export default function TeacherPage() {
                   <div className="p-4 border rounded-lg bg-gray-50">
                     <AttendanceQRCode
                       session={session}
-                      onExpire={() => handleSessionExpire(session._id)}
+                      onExpire={async () => {
+                        try {
+                            await handleSessionExpire(session._id);
+                        } catch (error) {
+                            console.error('Failed to expire session:', error);
+                        }
+                    }}
+                      
                     />
                   </div>
                   <div className="flex justify-between items-center">
@@ -565,10 +631,19 @@ export default function TeacherPage() {
                       View Attendance
                     </button>
                     <button
-                      onClick={() => handleSessionExpire(session._id)}
-                      className="text-sm text-red-600 hover:text-red-800"
+                      onClick={async () => {
+                        if (!isLoading) {
+                            await handleSessionExpire(session._id);
+                        }
+                    }}
+                    disabled={isLoading}
+                    className={`text-sm ${
+                      isLoading 
+                          ? 'text-gray-400 cursor-not-allowed' 
+                          : 'text-red-600 hover:text-red-800'
+                  }`}
                     >
-                      End Session
+                      {isLoading ? 'Ending Session...' : 'End Session'}
                     </button>
                   </div>
                 </div>
